@@ -1,6 +1,5 @@
 const path = require('path');
 const fs = require('fs');
-const strict = require('assert/strict');
 
 const { stdin, stdout } = process;
 filePath = path.join('02-write-file', 'text.txt')
@@ -29,3 +28,7 @@ stdin.on('data', data => {
         );
     }
 });
+process.on('SIGINT', () => {
+    stdout.write('\nУдачи!');
+    process.exit();
+  });
