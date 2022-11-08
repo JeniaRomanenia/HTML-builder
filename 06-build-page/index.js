@@ -1,114 +1,108 @@
-let path = require('path');
-let fs = require('fs');
-let pathStyles = path.join(__dirname, 'styles');
-let pathAssets = path.join(__dirname, 'assets');
-let pathCopy = path.join(__dirname, 'project-dist');
-let pathAssetsCopy = path.join(pathCopy, 'assets');
-let folderPath = path.join(__dirname, 'components');
+const path = require('path');
+const fs = require('fs');
+const fsP = require('fs/promises');
+const htmlTemplatePath = path.join(__dirname, 'template.html');
+const htmlCompPath = path.join(__dirname, 'components');
+const stylesPath = path.join(__dirname, 'styles');
+const distPath = path.join(__dirname, 'project-dist');
+const assetsPath = path.join(distPath, 'assets');
 
-fs.readdir(pathStyles, {withFileTypes: true}, async (error, files) => {
-    if (error) {
-      console.log(error);
-    }
+const findFolder = async (folder) => {
+  let folderExisting;
+  await fs.access(folder, async (error) => {
+    if (!error) folderExisting = true;
+    else folderExisting = false;
+  });
+  return folderExisting;
+};
+
+const newFolder = async (folder) => {
+  if (await findFolder(folder)) {
+    await fsP.rm(folder, { recursive: true });
+  }
+  await fsP.mkdir(folder, { recursive: true });
+  return true;
+};
+
+const copyFiles = async (actualDir, nextDir, fileName) => {
+  await fs.copyFile(
+    path.join(actualDir, fileName),
+    path.join(nextDir, fileName),
+    function (error) {
+      if (error) console.log(error.message);
+    },
+  );
+};
+
+const buildAssets = async (actualDir, nextDir) => {
+  const files = await fsP.readdir(actualDir, { withFileTypes: true });
+  for (let file of files) {
+    if (file.isFile()) copyFiles(actualDir, nextDir, file.name);
     else {
-      files.forEach(function(file, index) {
-        let filePath = path.join(pathStyles, file.name);
-        if (file.isFile() && file.name.split('.')[1] === 'css') {
-          fs.readFile(filePath, 'utf8', function (error, data) {
-            if(error) {
-              console.log(error);
-            } else if (index === 0) {
-              fs.writeFile(path.join(pathCopy, 'style.css'), data, function (error) {
-                if(error)
-                  console.log(error);
-              });
-            }  else {
-              fs.appendFile(path.join(pathCopy, 'style.css'), data, function(error) {
-                if(error)
-                  console.log(error);
-              });
-            }
-          });
-        }
-      });
-    }
-});
-
-function recurceCopy(dir, exit) {
-    fs.readdir(dir, {withFileTypes: true}, function (error, files) {
-      if (error) throw error;
-      files.forEach(function(file) {
-        if (!file.isFile()) {
-          fs.stat(path.join(exit, file.name), function(error) {
-            if (error) {
-              fs.mkdir(path.join(exit, file.name), function(error) {
-                if (error) {
-                  return console.erroror(error);
-                }
-                            });
-              recurceCopy(`${dir}\\${file.name}`, path.join(exit, file.name));
-            } else {
-              recurceCopy(`${dir}\\${file.name}`, path.join(exit, file.name));
-            }
-          });
-        } else {
-          fs.copyFile(`${dir}\\${file.name}`, `${exit}\\${file.name}`, function(error){
-            if (error) throw error;
-          });
-        }
-      });
-    });
-}
-
-fs.stat (pathCopy, function (error) {
-    if (error) {
-      fs.mkdir(pathCopy, function (error) {
-        if (error) {
-          return console.erroror(error);
-        }
-        });
-      createTemplate();
-    } else {  fs.readdir(pathCopy, function (error)  {
-      if (error)
-        console.log(error);
-      else {
-        createTemplate();
+      if (await newFolder(path.join(assetsPath, file.name))) {
+        buildAssets(
+          path.join(actualDir, file.name),
+          path.join(nextDir, file.name),
+        );
       }
-    });
+    }
+  }
+};
+
+const buildHtml = async () => {
+  await fs.readFile(htmlTemplatePath, 'utf-8', (error, data) => {
+    if (error) console.log(error.message);
+    let htmlToChange = data;
+    let regex = /{{[\s\S]+?}}/g;
+    const tagsNames = htmlToChange.match(regex);
+    for (let tag of tagsNames) {
+      const tagPath = path.join(htmlCompPath, tag.slice(2, -2) + '.html');
+      fs.readFile(tagPath, 'utf-8', (error, tagHtml) => {
+        if (error) console.log(error.message);
+        if (htmlToChange.includes(tag)) {
+          htmlToChange = htmlToChange.replace(tag, tagHtml);
+          fs.writeFile(
+            path.join(distPath, 'index.html'),
+            htmlToChange,
+            (error) => {
+              if (error) console.log(error.message);
+            },
+          );
+        }
+      });
     }
   });
+};
 
-  fs.stat (pathAssetsCopy, function (error) {
-    if (error) {
-      fs.mkdir(pathAssetsCopy, function(error) {
-        if (error) {
-          return console.erroror(error);
-        }
+const buildCss = async (actualDir, nextDir) => {
+  const streamWrite = await fs.createWriteStream(nextDir);
+  let files = await fsP.readdir(actualDir, { withFileTypes: true });
+  files = files.reverse();
+  for (let file of files) {
+    if (
+      file.isFile() &&
+      path.extname(path.join(stylesPath, file.name)) === '.css'
+    ) {
+      const stream = fs.createReadStream(path.join(stylesPath, file.name), {
+        encoding: 'utf-8',
       });
-      recurceCopy(pathAssets, pathAssetsCopy);
-    } else {
-      recurceCopy(pathAssets, pathAssetsCopy);
+      stream.pipe(streamWrite);
     }
-});
+  }
+};
 
-  function createTemplate() {
-    fs.copyFile(`${__dirname}\\template.html`, `${pathCopy}\\index.html`, function (error) {
-      if (error) throw error;
-      fs.readFile(`${pathCopy}\\index.html`, 'utf8', function(error, data) {
-        if(error) throw error;
-        fs.readdir(folderPath, {withFileTypes: true}, function (error, files) {
-          if (error) throw error;
-          files.forEach(function(file) {
-            fs.readFile(`${folderPath}\\${file.name}`, 'utf8', function(error, dataFile) {
-              if(error) throw error;
-              let tagName = `{{${file.name.split('.')[0]}}}`;
-              data = data.replace(tagName, dataFile);
-              fs.writeFile(`${pathCopy}\\index.html`, data, function (error) {
-                if(error)
-                  console.log(error);});
-            });
-          });
-        });
-      });
-    });
+function makingDistFolder() {
+  newFolder(distPath);
+  newFolder(assetsPath);
+  makingDist();
 }
+
+async function makingDist() {
+  buildHtml();
+  buildAssets(path.join(__dirname, 'assets'), assetsPath);
+  if (await newFolder(distPath)) {
+    buildCss(stylesPath, path.join(distPath, 'style.css'));
+  }
+}
+
+makingDistFolder();
