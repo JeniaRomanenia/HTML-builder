@@ -1,108 +1,129 @@
 const path = require('path');
 const fs = require('fs');
-const fsP = require('fs/promises');
-const htmlTemplatePath = path.join(__dirname, 'template.html');
-const htmlCompPath = path.join(__dirname, 'components');
-const stylesPath = path.join(__dirname, 'styles');
-const distPath = path.join(__dirname, 'project-dist');
-const assetsPath = path.join(distPath, 'assets');
+const assetsPath = path.join(__dirname, '/assets');
+const assetsCopyPath = path.join(__dirname, '/project-dist/assets');
+const stylesPath = path.join(__dirname, '/styles');
+const templatePath = path.join(__dirname, 'template.html');
+const indexPath = path.join(__dirname, 'project-dist', 'index.html');
 
-const findFolder = async (folder) => {
-  let folderExisting;
-  await fs.access(folder, async (error) => {
-    if (!error) folderExisting = true;
-    else folderExisting = false;
-  });
-  return folderExisting;
-};
-
-const newFolder = async (folder) => {
-  if (await findFolder(folder)) {
-    await fsP.rm(folder, { recursive: true });
+fs.mkdir(path.join(__dirname, 'project-dist'), { recursive: true }, (err) => {
+  if (err) {
+    return console.error(err);
   }
-  await fsP.mkdir(folder, { recursive: true });
-  return true;
-};
+});
 
-const copyFiles = async (actualDir, nextDir, fileName) => {
-  await fs.copyFile(
-    path.join(actualDir, fileName),
-    path.join(nextDir, fileName),
-    function (error) {
-      if (error) console.log(error.message);
-    },
-  );
-};
-
-const buildAssets = async (actualDir, nextDir) => {
-  const files = await fsP.readdir(actualDir, { withFileTypes: true });
-  for (let file of files) {
-    if (file.isFile()) copyFiles(actualDir, nextDir, file.name);
-    else {
-      if (await newFolder(path.join(assetsPath, file.name))) {
-        buildAssets(
-          path.join(actualDir, file.name),
-          path.join(nextDir, file.name),
-        );
-      }
+const copyDir = (folderPath, folderCopyPath) => {
+  fs.rm(folderCopyPath, { recursive: true, force: true }, (err) => {
+    if (err) {
+      return console.error(err);
     }
-  }
-};
 
-const buildHtml = async () => {
-  await fs.readFile(htmlTemplatePath, 'utf-8', (error, data) => {
-    if (error) console.log(error.message);
-    let htmlToChange = data;
-    let regex = /{{[\s\S]+?}}/g;
-    const tagsNames = htmlToChange.match(regex);
-    for (let tag of tagsNames) {
-      const tagPath = path.join(htmlCompPath, tag.slice(2, -2) + '.html');
-      fs.readFile(tagPath, 'utf-8', (error, tagHtml) => {
-        if (error) console.log(error.message);
-        if (htmlToChange.includes(tag)) {
-          htmlToChange = htmlToChange.replace(tag, tagHtml);
-          fs.writeFile(
-            path.join(distPath, 'index.html'),
-            htmlToChange,
-            (error) => {
-              if (error) console.log(error.message);
-            },
-          );
+    fs.mkdir(folderCopyPath, { recursive: true }, (err) => {
+      if (err) {
+        return console.error(err);
+      }
+    });
+    fs.readdir(folderPath, { withFileTypes: true }, (err, files) => {
+      if (err) {
+        return console.error(err);
+      }
+
+      files.forEach((file) => {
+        const filePath = path.join(folderPath, file.name);
+        const fileCopyPath = path.join(folderCopyPath, file.name);
+
+        if (file.isFile()) {
+          fs.copyFile(filePath, fileCopyPath, (err) => {
+            if (err) {
+              return console.error(err);
+            }
+          });
+        }
+
+        if (file.isDirectory()) {
+          copyDir(filePath, fileCopyPath);
         }
       });
-    }
+    });
   });
 };
 
-const buildCss = async (actualDir, nextDir) => {
-  const streamWrite = await fs.createWriteStream(nextDir);
-  let files = await fsP.readdir(actualDir, { withFileTypes: true });
-  files = files.reverse();
-  for (let file of files) {
-    if (
-      file.isFile() &&
-      path.extname(path.join(stylesPath, file.name)) === '.css'
-    ) {
-      const stream = fs.createReadStream(path.join(stylesPath, file.name), {
-        encoding: 'utf-8',
-      });
-      stream.pipe(streamWrite);
+copyDir(assetsPath, assetsCopyPath);
+
+// add style.css
+
+const style = fs.createWriteStream(
+  path.join(__dirname, '/project-dist', 'style.css'),
+  (err) => {
+    if (err) {
+      return console.error(err);
     }
+  },
+);
+
+fs.readdir(stylesPath, { withFileTypes: true }, (err, files) => {
+  if (err) {
+    return console.error(err);
   }
-};
 
-function makingDistFolder() {
-  newFolder(distPath);
-  newFolder(assetsPath);
-  makingDist();
-}
+  files.forEach((file) => {
+    if (file.isFile()) {
+      const filePath = path.join(stylesPath, file.name);
+      const fileExtension = path.extname(filePath).slice(1);
 
-async function makingDist() {
-  buildHtml();
-  buildAssets(path.join(__dirname, 'assets'), assetsPath);
-  if (await newFolder(distPath)) {
-    buildCss(stylesPath, path.join(distPath, 'style.css'));
+      if (fileExtension === 'css') {
+        const readStream = fs.createReadStream(filePath, 'utf-8');
+        let data = '';
+
+        readStream.on('data', (chunk) => (data += chunk));
+        readStream.on('end', () => {
+          style.write(data.trim());
+          style.write('\n\n');
+        });
+        readStream.on('error', (err) => {
+          if (err) {
+            return console.error(err);
+          }
+        });
+      }
+    }
+  });
+});
+
+// add index.html
+
+fs.copyFile(templatePath, indexPath, (err) => {
+  if (err) {
+    return console.error(err);
   }
-}
+});
 
-makingDistFolder();
+fs.readFile(templatePath, 'utf-8', (err, data) => {
+  if (err) console.log(err);
+
+  let templateData = data;
+  const templateTags = data.match(/{{\w+}}/gm);
+
+  for (let tag of templateTags) {
+    const tagPath = path.join(
+      __dirname,
+      '/components',
+      `${tag.slice(2, -2)}.html`,
+    );
+
+    fs.readFile(tagPath, 'utf-8', (err, dataTag) => {
+      if (err) console.log(err);
+
+      templateData = templateData.replace(tag, dataTag);
+
+      fs.rm(indexPath, { recursive: true, force: true }, (err) => {
+        if (err) {
+          return console.error(err);
+        }
+        const index = fs.createWriteStream(indexPath);
+        index.write(templateData);
+      });
+    });
+  }
+});
+
